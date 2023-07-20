@@ -1,5 +1,3 @@
-//latest mtu1 code
-
 #include <BlynkSimpleEsp32.h>
 #include <WiFi.h>
 #include <time.h>
@@ -56,6 +54,9 @@ void setup()
   telnetServer.begin();
   
   Blynk.begin(auth, WIFI_SSID, WIFI_PASS);
+  
+  Blynk.syncVirtual(V28);  // Add blynk sync command for totalCubicMeter
+
   if (WiFi.status() == WL_CONNECTED) {
     telnetPrintln("Connected to WiFi!");
   } else {
@@ -82,6 +83,12 @@ void setup()
   }
 
   previousMillis = millis();
+}
+
+// This function will be called every time App writes value to Virtual Pin 28
+BLYNK_WRITE(V28)
+{
+  totalCubicMeter = param.asFloat(); // assigning incoming value from server to totalCubicMeter
 }
 
 void calculateFlow()
@@ -116,6 +123,7 @@ void calculateFlow()
       if (timeinfo.tm_mday == 1 && previousMillis != 1) {
         totalCubicMeter = 0.0; // reset the counter
         previousMillis = millis(); // update the previousMillis after reset
+        Blynk.virtualWrite(V28, totalCubicMeter); // update the value on the Blynk server
       }
       
       telnetPrint("Current date: ");
@@ -145,6 +153,3 @@ void loop()
     telnetClient = telnetServer.available();
   }
 }
-
-
-//latest code ++
