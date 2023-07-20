@@ -19,6 +19,8 @@ float flowMilliLitresPerMinute;  // Changed to float
 float totalCubicMeter;  // Changed to float
 unsigned long previousMillis = 0;
 
+int batteryLevel = 100; // Define battery level (0 - 100%)
+
 BlynkTimer timer;
 WiFiServer telnetServer(23);
 WiFiClient telnetClient;
@@ -40,6 +42,21 @@ void telnetPrintln(const char *s) {
   }
 }
 
+void sendBatteryLevel() {
+  // Send battery level to virtual pin V0
+  Blynk.virtualWrite(V0, batteryLevel);
+}
+
+void decreaseBatteryLevel() {
+  // Decrease the battery level by 1
+  if (batteryLevel > 0) {
+    batteryLevel--;
+  }
+
+  // Print the current battery level
+  telnetPrintln(("Current battery level: " + String(batteryLevel)).c_str());
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -55,7 +72,8 @@ void setup()
   
   Blynk.begin(auth, WIFI_SSID, WIFI_PASS);
   
-  Blynk.syncVirtual(V28);  // Add blynk sync command for totalCubicMeter
+  Blynk.syncVirtual(V30);  // Add blynk sync command for totalCubicMeter
+  Blynk.syncVirtual(V0);  // Add blynk sync command for batteryLevel
 
   if (WiFi.status() == WL_CONNECTED) {
     telnetPrintln("Connected to WiFi!");
@@ -83,12 +101,22 @@ void setup()
   }
 
   previousMillis = millis();
+
+  // Setup timers
+  timer.setInterval(1000L, sendBatteryLevel); // Send battery level every 1 second
+  timer.setInterval(300000L, decreaseBatteryLevel); // Decrease battery level every 5 minutes
 }
 
 // This function will be called every time App writes value to Virtual Pin 28
-BLYNK_WRITE(V28)
+BLYNK_WRITE(V30)
 {
   totalCubicMeter = param.asFloat(); // assigning incoming value from server to totalCubicMeter
+}
+
+// This function will be called every time App writes value to Virtual Pin 30
+BLYNK_WRITE(V0)
+{
+  batteryLevel = param.asInt(); // assigning incoming value from server to batteryLevel
 }
 
 void calculateFlow()
@@ -107,7 +135,7 @@ void calculateFlow()
     previousMillis = currentMillis;
     
     Blynk.virtualWrite(V27, flowMilliLitresPerMinute); // send flowRate to Blynk app in mL/min
-    Blynk.virtualWrite(V28, totalCubicMeter); // send totalCubicMeter to Blynk app in m^3
+    Blynk.virtualWrite(V30, totalCubicMeter); // send totalCubicMeter to Blynk app in m^3
 
     telnetPrint("Flow rate: ");
     telnetPrint(String(flowMilliLitresPerMinute, 2).c_str());  // Prints the flowRate in mL/min to 2 decimal places
@@ -123,11 +151,11 @@ void calculateFlow()
       if (timeinfo.tm_mday == 1 && previousMillis != 1) {
         totalCubicMeter = 0.0; // reset the counter
         previousMillis = millis(); // update the previousMillis after reset
-        Blynk.virtualWrite(V28, totalCubicMeter); // update the value on the Blynk server
+        Blynk.virtualWrite(V30, totalCubicMeter); // update the value on the Blynk server
       }
       
       telnetPrint("Current date: ");
-      telnetPrintln(asctime(&timeinfo)); // Print current date
+      telnetPrintln(asctime(&timeinfo)); // Print current date and time
     }
   }
 }
@@ -135,21 +163,18 @@ void calculateFlow()
 void loop()
 {
   Blynk.run();
+  timer.run();
   calculateFlow();
-
-  ArduinoOTA.handle();
-
-  if (!Blynk.connected()) {
-    telnetPrintln("Lost connection to Blynk server...");
-  }
-  if (WiFi.status() != WL_CONNECTED) {
-    telnetPrintln("Lost connection to WiFi...");
-  }
-
-  if (telnetServer.hasClient()) {
-    if (telnetClient.connected()) {
-      telnetClient.stop();
+  
+  WiFiClient client = telnetServer.available();
+  if (client) {
+    if (!telnetClient || !telnetClient.connected()) {
+      if (telnetClient) {
+        telnetClient.stop();
+      }
+      telnetClient = client;
     }
-    telnetClient = telnetServer.available();
   }
+  
+  ArduinoOTA.handle();
 }
