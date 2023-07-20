@@ -4,6 +4,14 @@
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
 
+#define SENSOR  2  // Change here
+
+volatile byte pulseCount;
+byte pulse1Sec = 0;
+float calibrationFactor = 4.5;
+float flowMilliLitresPerMinute;  // Changed to float
+unsigned long previousMillis = 0;
+
 #ifndef STASSID
 #define STASSID "HUAWEI-4049"
 #define STAPSK  "personalwifisss1"
@@ -19,6 +27,11 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 WiFiServer telnetServer(23);
 WiFiClient telnet;
+
+void IRAM_ATTR pulseCounter()
+{
+  pulseCount++;
+}
 
 void setup_wifi() {
   delay(10);
@@ -66,9 +79,36 @@ void setup() {
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
+  pinMode(SENSOR, INPUT_PULLUP);
+  pulseCount = 0;
+  flowMilliLitresPerMinute = 0.0;
+  attachInterrupt(digitalPinToInterrupt(SENSOR), pulseCounter, FALLING);
+
+  previousMillis = millis();
+
   telnetServer.begin();
   telnetServer.setNoDelay(true);
   ArduinoOTA.begin();
+}
+
+void calculateFlow()
+{
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - previousMillis > 1000) 
+  {
+    pulse1Sec = pulseCount;
+    pulseCount = 0;
+
+    float flowRateLperMin = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
+    flowMilliLitresPerMinute = flowRateLperMin * 1000; // L/min to mL/min
+
+    previousMillis = currentMillis;
+    
+    telnet.print("Flow rate: ");
+    telnet.print(flowMilliLitresPerMinute, 2);  // Prints the flowRate in mL/min to 2 decimal places
+    telnet.println(" mL/min");
+  }
 }
 
 void loop() {
@@ -88,4 +128,6 @@ void loop() {
       telnet = telnetServer.available();
     }
   }
+
+  calculateFlow();
 }
