@@ -4,11 +4,15 @@
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+#include <PubSubClient.h>
 
 #define SENSOR  4  // Change here
 #define BLYNK_PRINT Serial
 #define WIFI_SSID "HUAWEI-4049"
 #define WIFI_PASS "personalwifisss1"
+
+const char* mqtt_server = "20.163.192.238";
+const int mqtt_port = 1883;
 
 char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2"; // Your Blynk auth token
 
@@ -23,7 +27,9 @@ int batteryLevel = 100; // Define battery level (0 - 100%)
 
 BlynkTimer timer;
 WiFiServer telnetServer(23);
-WiFiClient telnetClient;
+WiFiClient espClient;
+WiFiClient telnetWiFiClient;
+PubSubClient mqttClient(espClient);
 
 void IRAM_ATTR pulseCounter()
 {
@@ -31,14 +37,14 @@ void IRAM_ATTR pulseCounter()
 }
 
 void telnetPrint(const char *s) {
-  if (telnetClient.connected()) {
-    telnetClient.print(s);
+  if (telnetWiFiClient.connected()) {
+    telnetWiFiClient.print(s);
   }
 }
 
 void telnetPrintln(const char *s) {
-  if (telnetClient.connected()) {
-    telnetClient.println(s);
+  if (telnetWiFiClient.connected()) {
+    telnetWiFiClient.println(s);
   }
 }
 
@@ -57,10 +63,25 @@ void decreaseBatteryLevel() {
   telnetPrintln(("Current battery level: " + String(batteryLevel)).c_str());
 }
 
+void setup_mqtt() {
+  mqttClient.setServer(mqtt_server, mqtt_port);
+  while (!mqttClient.connected()) {
+    Serial.println("Connecting to MQTT...");
+
+    if (mqttClient.connect("ESP32Client")) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed with state ");
+      Serial.print(mqttClient.state());
+      delay(2000);
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
-  
+
   telnetPrintln("Connecting to WiFi...");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -71,6 +92,8 @@ void setup()
   telnetServer.begin();
   
   Blynk.begin(auth, WIFI_SSID, WIFI_PASS);
+
+  setup_mqtt(); // set up MQTT
   
   Blynk.syncVirtual(V30);  // Add blynk sync command for totalCubicMeter
   Blynk.syncVirtual(V0);  // Add blynk sync command for batteryLevel
@@ -145,6 +168,8 @@ void calculateFlow()
     telnetPrint(String(totalCubicMeter, 4).c_str()); // Prints the totalCubicMeter in m^3 to 4 decimal places
     telnetPrintln(" m^3");
 
+    mqttClient.publish("flowRate", String(flowMilliLitresPerMinute, 2).c_str()); // publish flow rate via MQTT
+
     struct tm timeinfo;
     if (getLocalTime(&timeinfo)) {
       // check if the day has changed to the first day of the month
@@ -168,13 +193,19 @@ void loop()
   
   WiFiClient client = telnetServer.available();
   if (client) {
-    if (!telnetClient || !telnetClient.connected()) {
-      if (telnetClient) {
-        telnetClient.stop();
+    if (!telnetWiFiClient || !telnetWiFiClient.connected()) {
+      if (telnetWiFiClient) {
+        telnetWiFiClient.stop();
       }
-      telnetClient = client;
+      telnetWiFiClient = client;
     }
   }
   
   ArduinoOTA.handle();
+
+  // Check MQTT connection and reconnect if needed
+  if (!mqttClient.connected()) {
+    setup_mqtt();
+  }
+  mqttClient.loop();
 }
