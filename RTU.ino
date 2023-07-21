@@ -3,19 +3,29 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
-
-#define SENSOR  2  // Change here
-
-volatile byte pulseCount;
-byte pulse1Sec = 0;
-float calibrationFactor = 4.5;
-float flowMilliLitresPerMinute;  // Changed to float
-unsigned long previousMillis = 0;
+#include <BlynkSimpleEsp8266.h>
 
 #ifndef STASSID
 #define STASSID "HUAWEI-4049"
 #define STAPSK  "personalwifisss1"
 #endif
+
+#define SENSOR  2  // Change here
+#define LEAK_THRESHOLD 0.20 // 20% threshold for leak detection
+
+volatile byte pulseCount;
+byte pulse1Sec = 0;
+float calibrationFactor = 4.5;
+float flowMilliLitresPerMinute;  // Changed to float
+float receivedFlowRate = 0.0;    // For storing received flow rate
+unsigned long previousMillis = 0;
+bool leakDetected = false;
+
+char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2"; // Add your Blynk token here
+
+void IRAM_ATTR pulseCounter() {
+  pulseCount++;
+}
 
 const char* mqtt_server = "20.163.192.238";
 const int mqtt_port = 1883;
@@ -28,10 +38,7 @@ PubSubClient client(espClient);
 WiFiServer telnetServer(23);
 WiFiClient telnet;
 
-void IRAM_ATTR pulseCounter()
-{
-  pulseCount++;
-}
+BlynkTimer timer;
 
 void setup_wifi() {
   delay(10);
@@ -56,6 +63,15 @@ void callback(char* topic, byte* payload, unsigned int length) {
     telnet.print((char)payload[i]);
   }
   telnet.println();
+
+  // Convert payload to string
+  String receivedPayload;
+  for (unsigned int i = 0; i < length; i++) {
+    receivedPayload += (char)payload[i];
+  }
+
+  // Convert string payload to float
+  receivedFlowRate = receivedPayload.toFloat();
 }
 
 void reconnect() {
@@ -69,6 +85,24 @@ void reconnect() {
       telnet.print(client.state());
       telnet.println(" try again in 5 seconds");
       delay(5000);
+    }
+  }
+}
+
+void checkForLeaks() {
+  float flowRateDifference = abs(flowMilliLitresPerMinute - receivedFlowRate);
+  if (flowRateDifference / flowMilliLitresPerMinute > LEAK_THRESHOLD) {
+    if (!leakDetected) {
+      leakDetected = true;
+      telnet.println("Leak detected");
+      Blynk.virtualWrite(V31, "Leak detected");
+    }
+  }
+  else {
+    if (leakDetected) {
+      leakDetected = false;
+      telnet.println("No leak detected");
+      Blynk.virtualWrite(V31, "No leak detected");
     }
   }
 }
@@ -89,14 +123,16 @@ void setup() {
   telnetServer.begin();
   telnetServer.setNoDelay(true);
   ArduinoOTA.begin();
+
+  Blynk.begin(auth, ssid, password);
+
+  timer.setInterval(1000L, checkForLeaks);
 }
 
-void calculateFlow()
-{
+void calculateFlow() {
   unsigned long currentMillis = millis();
-  
-  if (currentMillis - previousMillis > 1000) 
-  {
+
+  if (currentMillis - previousMillis > 1000) {
     pulse1Sec = pulseCount;
     pulseCount = 0;
 
@@ -104,10 +140,12 @@ void calculateFlow()
     flowMilliLitresPerMinute = flowRateLperMin * 1000; // L/min to mL/min
 
     previousMillis = currentMillis;
-    
+
     telnet.print("Flow rate: ");
     telnet.print(flowMilliLitresPerMinute, 2);  // Prints the flowRate in mL/min to 2 decimal places
     telnet.println(" mL/min");
+
+    Blynk.virtualWrite(V32, flowMilliLitresPerMinute); // Send flow rate data to Blynk
   }
 }
 
@@ -116,7 +154,7 @@ void loop() {
     reconnect();
   }
   client.loop();
-  
+
   ArduinoOTA.handle();
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.begin(ssid, password);
@@ -129,5 +167,7 @@ void loop() {
     }
   }
 
+  Blynk.run();
+  timer.run(); // Initiates BlynkTimer
   calculateFlow();
 }
