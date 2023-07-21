@@ -21,6 +21,9 @@ float receivedFlowRate = 0.0;    // For storing received flow rate
 unsigned long previousMillis = 0;
 bool leakDetected = false;
 
+unsigned long leakStartTime = 0; // For keeping track of leak start time
+const unsigned long leakTimeThreshold = 60000;  // 10 seconds
+
 char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2"; // Add your Blynk token here
 
 void IRAM_ATTR pulseCounter() {
@@ -92,18 +95,18 @@ void reconnect() {
 void checkForLeaks() {
   float flowRateDifference = abs(flowMilliLitresPerMinute - receivedFlowRate);
   if (flowRateDifference / flowMilliLitresPerMinute > LEAK_THRESHOLD) {
-    if (!leakDetected) {
+    if (!leakDetected && (millis() - leakStartTime > leakTimeThreshold)) {
       leakDetected = true;
       telnet.println("Leak detected");
       Blynk.virtualWrite(V31, "Leak detected");
+    } else if (!leakDetected) {
+      leakStartTime = millis();
     }
-  }
-  else {
-    if (leakDetected) {
-      leakDetected = false;
-      telnet.println("No leak detected");
-      Blynk.virtualWrite(V31, "No leak detected");
-    }
+  } else {
+    leakDetected = false;
+    leakStartTime = 0;
+    telnet.println("No leak detected");
+    Blynk.virtualWrite(V31, "No leak detected");
   }
 }
 
