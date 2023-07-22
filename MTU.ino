@@ -18,8 +18,8 @@ char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2";
 
 volatile byte pulseCount;
 byte pulse1Sec = 0;
-float calibrationFactor = 4.5;
-float flowMilliLitresPerMinute;
+float calibrationFactor = 6.9;
+float flowMilliLitresPerSecond;
 float totalCubicMeter;
 unsigned long previousMillis = 0;
 
@@ -114,7 +114,7 @@ void setup()
 
   pinMode(SENSOR, INPUT_PULLUP);
   pulseCount = 0;
-  flowMilliLitresPerMinute = 0.0;
+  flowMilliLitresPerSecond = 0.0;
   totalCubicMeter = 0.0;
   attachInterrupt(digitalPinToInterrupt(SENSOR), pulseCounter, FALLING);
   
@@ -149,56 +149,34 @@ void calculateFlow()
     pulse1Sec = pulseCount;
     pulseCount = 0;
     float flowRateLperMin = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
-    flowMilliLitresPerMinute = flowRateLperMin * 1000; 
-    totalCubicMeter += flowMilliLitresPerMinute / (1000 * 1000 * 60);
+    flowMilliLitresPerSecond = (flowRateLperMin * 1000) / 60;
+    totalCubicMeter += flowMilliLitresPerSecond / (1000 * 1000);
 
     previousMillis = currentMillis;
-    Blynk.virtualWrite(V27, flowMilliLitresPerMinute);
+    Blynk.virtualWrite(V27, flowMilliLitresPerSecond);
     Blynk.virtualWrite(V30, totalCubicMeter);
 
     telnetPrint("Flow rate: ");
-    telnetPrint(String(flowMilliLitresPerMinute, 2).c_str()); 
-    telnetPrintln(" mL/min");
+    telnetPrint(String(flowMilliLitresPerSecond, 2).c_str()); 
+    telnetPrintln(" mL/s");
     telnetPrint("Total water consumed this month: ");
     telnetPrint(String(totalCubicMeter, 4).c_str()); 
     telnetPrintln(" m^3");
 
-    mqttClient.publish("flowRate", String(flowMilliLitresPerMinute, 2).c_str());
-
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-      if (timeinfo.tm_mday == 1 && previousMillis != 1) {
-        totalCubicMeter = 0.0;
-        previousMillis = millis();
-        Blynk.virtualWrite(V30, totalCubicMeter);
-      }
-      telnetPrint("Current date: ");
-      telnetPrintln(asctime(&timeinfo)); 
-    }
+    mqttClient.publish("flowRate", String(flowMilliLitresPerSecond, 2).c_str());
   }
 }
 
 void loop()
 {
   Blynk.run();
-  timer.run();
-  calculateFlow();
-  
-  WiFiClient client = telnetServer.available();
-  if (client) {
-    if (!telnetWiFiClient || !telnetWiFiClient.connected()) {
-      if (telnetWiFiClient) {
-        telnetWiFiClient.stop();
-      }
-      telnetWiFiClient = client;
-    }
-  }
-  
   ArduinoOTA.handle();
-
-  if (!mqttClient.connected()) {
-    setup_mqtt();
+  timer.run();
+  if (telnetServer.hasClient()) {
+    if (telnetWiFiClient.connected()) {
+      telnetWiFiClient.stop();
+    }
+    telnetWiFiClient = telnetServer.available();
   }
-  
-  mqttClient.loop();
+  calculateFlow();
 }
