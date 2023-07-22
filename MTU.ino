@@ -1,12 +1,12 @@
-#include <BlynkSimpleEsp32.h>
 #include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <PubSubClient.h>
 #include <time.h>
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
-#include <PubSubClient.h>
 
-#define SENSOR  4  // Change here
+#define SENSOR  4  
 #define BLYNK_PRINT Serial
 #define WIFI_SSID "HUAWEI-4049"
 #define WIFI_PASS "personalwifisss1"
@@ -14,16 +14,16 @@
 const char* mqtt_server = "20.163.192.238";
 const int mqtt_port = 1883;
 
-char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2"; // Your Blynk auth token
+char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2"; 
 
 volatile byte pulseCount;
 byte pulse1Sec = 0;
 float calibrationFactor = 4.5;
-float flowMilliLitresPerMinute;  // Changed to float
-float totalCubicMeter;  // Changed to float
+float flowMilliLitresPerMinute;
+float totalCubicMeter;
 unsigned long previousMillis = 0;
 
-int batteryLevel = 100; // Define battery level (0 - 100%)
+int batteryLevel = 100;
 
 BlynkTimer timer;
 WiFiServer telnetServer(23);
@@ -49,17 +49,13 @@ void telnetPrintln(const char *s) {
 }
 
 void sendBatteryLevel() {
-  // Send battery level to virtual pin V0
   Blynk.virtualWrite(V0, batteryLevel);
 }
 
 void decreaseBatteryLevel() {
-  // Decrease the battery level by 1
   if (batteryLevel > 0) {
     batteryLevel--;
   }
-
-  // Print the current battery level
   telnetPrintln(("Current battery level: " + String(batteryLevel)).c_str());
 }
 
@@ -78,25 +74,31 @@ void setup_mqtt() {
   }
 }
 
+BLYNK_WRITE(V33) {
+  String input_text = param.asStr(); 
+  Blynk.virtualWrite(V30, 0.0); 
+  delay(1000);
+  ESP.restart();
+}
+
 void setup()
 {
   Serial.begin(115200);
-
   telnetPrintln("Connecting to WiFi...");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+  
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     ESP.restart();
   }
+  
   ArduinoOTA.begin();
   telnetServer.begin();
-  
   Blynk.begin(auth, WIFI_SSID, WIFI_PASS);
-
-  setup_mqtt(); // set up MQTT
+  setup_mqtt();
   
-  Blynk.syncVirtual(V30);  // Add blynk sync command for totalCubicMeter
-  Blynk.syncVirtual(V0);  // Add blynk sync command for batteryLevel
+  Blynk.syncVirtual(V30);
+  Blynk.syncVirtual(V0);
 
   if (WiFi.status() == WL_CONNECTED) {
     telnetPrintln("Connected to WiFi!");
@@ -116,30 +118,26 @@ void setup()
   totalCubicMeter = 0.0;
   attachInterrupt(digitalPinToInterrupt(SENSOR), pulseCounter, FALLING);
   
-  configTime(8 * 3600, 0, "pool.ntp.org"); // Set the timezone to GMT+8 (Philippines Standard Time)
+  configTime(8 * 3600, 0, "pool.ntp.org");
 
   struct tm timeinfo;
   if (getLocalTime(&timeinfo)) {
-    telnetPrintln(asctime(&timeinfo)); // Print current date and time
+    telnetPrintln(asctime(&timeinfo));
   }
 
   previousMillis = millis();
-
-  // Setup timers
-  timer.setInterval(1000L, sendBatteryLevel); // Send battery level every 1 second
-  timer.setInterval(300000L, decreaseBatteryLevel); // Decrease battery level every 5 minutes
+  timer.setInterval(1000L, sendBatteryLevel);
+  timer.setInterval(300000L, decreaseBatteryLevel);
 }
 
-// This function will be called every time App writes value to Virtual Pin 28
 BLYNK_WRITE(V30)
 {
-  totalCubicMeter = param.asFloat(); // assigning incoming value from server to totalCubicMeter
+  totalCubicMeter = param.asFloat(); 
 }
 
-// This function will be called every time App writes value to Virtual Pin 30
 BLYNK_WRITE(V0)
 {
-  batteryLevel = param.asInt(); // assigning incoming value from server to batteryLevel
+  batteryLevel = param.asInt(); 
 }
 
 void calculateFlow()
@@ -150,37 +148,32 @@ void calculateFlow()
   {
     pulse1Sec = pulseCount;
     pulseCount = 0;
-
     float flowRateLperMin = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
-    flowMilliLitresPerMinute = flowRateLperMin * 1000; // L/min to mL/min
-    totalCubicMeter += flowMilliLitresPerMinute / (1000 * 1000 * 60); // mL/min to m^3
+    flowMilliLitresPerMinute = flowRateLperMin * 1000; 
+    totalCubicMeter += flowMilliLitresPerMinute / (1000 * 1000 * 60);
 
     previousMillis = currentMillis;
-    
-    Blynk.virtualWrite(V27, flowMilliLitresPerMinute); // send flowRate to Blynk app in mL/min
-    Blynk.virtualWrite(V30, totalCubicMeter); // send totalCubicMeter to Blynk app in m^3
+    Blynk.virtualWrite(V27, flowMilliLitresPerMinute);
+    Blynk.virtualWrite(V30, totalCubicMeter);
 
     telnetPrint("Flow rate: ");
-    telnetPrint(String(flowMilliLitresPerMinute, 2).c_str());  // Prints the flowRate in mL/min to 2 decimal places
+    telnetPrint(String(flowMilliLitresPerMinute, 2).c_str()); 
     telnetPrintln(" mL/min");
-
     telnetPrint("Total water consumed this month: ");
-    telnetPrint(String(totalCubicMeter, 4).c_str()); // Prints the totalCubicMeter in m^3 to 4 decimal places
+    telnetPrint(String(totalCubicMeter, 4).c_str()); 
     telnetPrintln(" m^3");
 
-    mqttClient.publish("flowRate", String(flowMilliLitresPerMinute, 2).c_str()); // publish flow rate via MQTT
+    mqttClient.publish("flowRate", String(flowMilliLitresPerMinute, 2).c_str());
 
     struct tm timeinfo;
     if (getLocalTime(&timeinfo)) {
-      // check if the day has changed to the first day of the month
       if (timeinfo.tm_mday == 1 && previousMillis != 1) {
-        totalCubicMeter = 0.0; // reset the counter
-        previousMillis = millis(); // update the previousMillis after reset
-        Blynk.virtualWrite(V30, totalCubicMeter); // update the value on the Blynk server
+        totalCubicMeter = 0.0;
+        previousMillis = millis();
+        Blynk.virtualWrite(V30, totalCubicMeter);
       }
-      
       telnetPrint("Current date: ");
-      telnetPrintln(asctime(&timeinfo)); // Print current date and time
+      telnetPrintln(asctime(&timeinfo)); 
     }
   }
 }
@@ -203,9 +196,9 @@ void loop()
   
   ArduinoOTA.handle();
 
-  // Check MQTT connection and reconnect if needed
   if (!mqttClient.connected()) {
     setup_mqtt();
   }
+  
   mqttClient.loop();
 }
