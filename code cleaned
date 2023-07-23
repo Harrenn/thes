@@ -18,19 +18,17 @@ char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2";
 
 volatile byte pulseCount;
 byte pulse1Sec = 0;
-float calibrationFactor = 6.9;
+float calibrationFactor = 4.5;
 float flowMilliLitresPerSecond;
-float totalCubicMeter;
+float totalCubicMeter = 0.0;
 unsigned long previousMillis = 0;
-
 int batteryLevel = 100;
 
 BlynkTimer timer;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-void IRAM_ATTR pulseCounter()
-{
+void IRAM_ATTR pulseCounter() {
   pulseCount++;
 }
 
@@ -42,6 +40,7 @@ void decreaseBatteryLevel() {
   if (batteryLevel > 0) {
     batteryLevel--;
   }
+  Serial.println("Current battery level: " + String(batteryLevel));
 }
 
 void setup_mqtt() {
@@ -60,11 +59,13 @@ void setup_mqtt() {
 }
 
 BLYNK_WRITE(V33) {
+  String input_text = param.asStr(); 
+  Blynk.virtualWrite(V30, 0.0); 
+  delay(1000);
   ESP.restart();
 }
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -83,50 +84,62 @@ void setup()
   pinMode(SENSOR, INPUT_PULLUP);
   pulseCount = 0;
   flowMilliLitresPerSecond = 0.0;
-  totalCubicMeter = 0.0;
   attachInterrupt(digitalPinToInterrupt(SENSOR), pulseCounter, FALLING);
   
   configTime(8 * 3600, 0, "pool.ntp.org");
 
-  previousMillis = millis();
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    Serial.println(asctime(&timeinfo));
+  }
+
   timer.setInterval(1000L, sendBatteryLevel);
   timer.setInterval(300000L, decreaseBatteryLevel);
 }
 
-BLYNK_WRITE(V30)
-{
+BLYNK_WRITE(V30) {
   totalCubicMeter = param.asFloat(); 
 }
 
-BLYNK_WRITE(V0)
-{
+BLYNK_WRITE(V0) {
   batteryLevel = param.asInt(); 
 }
 
-void calculateFlow()
-{
+void calculateFlow() {
   unsigned long currentMillis = millis();
-  
-  if (currentMillis - previousMillis > 1000) 
-  {
+  if (currentMillis - previousMillis > 1000) {
     pulse1Sec = pulseCount;
     pulseCount = 0;
-    float flowRateLperMin = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
-    flowMilliLitresPerSecond = (flowRateLperMin * 1000) / 60;
-    totalCubicMeter += flowMilliLitresPerSecond / (1000 * 1000);
-
+    float flowRateLperSec = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
+    flowMilliLitresPerSecond = (flowRateLperSec * 1000) / 60;
+    totalCubicMeter += flowMilliLitresPerSecond / (1000 * 1000 * 60);
     previousMillis = currentMillis;
     Blynk.virtualWrite(V27, flowMilliLitresPerSecond);
     Blynk.virtualWrite(V30, totalCubicMeter);
-
+    Serial.print("Flow rate: ");
+    Serial.println(String(flowMilliLitresPerSecond, 2) + " mL/sec");
+    Serial.print("Total water consumed this month: ");
+    Serial.println(String(totalCubicMeter, 4) + " m^3");
     mqttClient.publish("flowRate", String(flowMilliLitresPerSecond, 2).c_str());
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+      if (timeinfo.tm_mday == 1 && previousMillis != 1) {
+        totalCubicMeter = 0.0;
+        Blynk.virtualWrite(V30, totalCubicMeter);
+      }
+      Serial.print("Current date: ");
+      Serial.println(asctime(&timeinfo));
+    }
   }
 }
 
-void loop()
-{
+void loop() {
   Blynk.run();
-  ArduinoOTA.handle();
   timer.run();
   calculateFlow();
+  ArduinoOTA.handle();
+  if (!mqttClient.connected()) {
+    setup_mqtt();
+  }
+  mqttClient.loop();
 }
