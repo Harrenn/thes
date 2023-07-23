@@ -28,6 +28,12 @@ BlynkTimer timer;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
+// Buffer for the simple moving average
+#define BUFF_SIZE 10
+float buff[BUFF_SIZE];
+int buffIndex = 0;
+bool bufferFull = false;
+
 void IRAM_ATTR pulseCounter() {
   pulseCount++;
 }
@@ -40,19 +46,13 @@ void decreaseBatteryLevel() {
   if (batteryLevel > 0) {
     batteryLevel--;
   }
-  Serial.println("Current battery level: " + String(batteryLevel));
 }
 
 void setup_mqtt() {
   mqttClient.setServer(mqtt_server, mqtt_port);
   while (!mqttClient.connected()) {
-    Serial.println("Connecting to MQTT...");
-
     if (mqttClient.connect("ESP32Client")) {
-      Serial.println("connected");
     } else {
-      Serial.print("failed with state ");
-      Serial.print(mqttClient.state());
       delay(2000);
     }
   }
@@ -66,7 +66,6 @@ BLYNK_WRITE(V33) {
 }
 
 void setup() {
-  Serial.begin(115200);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   
@@ -89,12 +88,13 @@ void setup() {
   configTime(8 * 3600, 0, "pool.ntp.org");
 
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
-    Serial.println(asctime(&timeinfo));
-  }
 
   timer.setInterval(1000L, sendBatteryLevel);
   timer.setInterval(300000L, decreaseBatteryLevel);
+
+  // Initialize the buffer for the moving average
+  for(int i = 0; i < BUFF_SIZE; i++)
+    buff[i] = 0;
 }
 
 BLYNK_WRITE(V30) {
@@ -105,30 +105,41 @@ BLYNK_WRITE(V0) {
   batteryLevel = param.asInt(); 
 }
 
+// Calculate the simple moving average
+float movingAvgFlowRate() {
+  float sum = 0;
+  for(int i = 0; i < BUFF_SIZE; i++)
+    sum += buff[i];
+  
+  return sum / ((bufferFull) ? BUFF_SIZE : buffIndex);
+}
+
 void calculateFlow() {
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis > 1000) {
     pulse1Sec = pulseCount;
     pulseCount = 0;
     float flowRateLperSec = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
-    flowMilliLitresPerSecond = (flowRateLperSec * 1000) / 60;
-    totalCubicMeter += flowMilliLitresPerSecond / (1000 * 1000 * 60);
+    flowMilliLitresPerSecond = flowRateLperSec * 1000;
+
+    // Add the flow rate to the buffer
+    buff[buffIndex] = flowMilliLitresPerSecond;
+    buffIndex = (buffIndex + 1) % BUFF_SIZE;
+    if(buffIndex == 0) bufferFull = true;
+    float smoothedFlowRate = movingAvgFlowRate();
+
+    totalCubicMeter += smoothedFlowRate / (1000 * 1000 * 60);
     previousMillis = currentMillis;
-    Blynk.virtualWrite(V27, flowMilliLitresPerSecond);
+    Blynk.virtualWrite(V27, smoothedFlowRate);
     Blynk.virtualWrite(V30, totalCubicMeter);
-    Serial.print("Flow rate: ");
-    Serial.println(String(flowMilliLitresPerSecond, 2) + " mL/sec");
-    Serial.print("Total water consumed this month: ");
-    Serial.println(String(totalCubicMeter, 4) + " m^3");
-    mqttClient.publish("flowRate", String(flowMilliLitresPerSecond, 2).c_str());
+    
+    mqttClient.publish("flowRate", String(smoothedFlowRate, 2).c_str());
     struct tm timeinfo;
     if (getLocalTime(&timeinfo)) {
       if (timeinfo.tm_mday == 1 && previousMillis != 1) {
         totalCubicMeter = 0.0;
         Blynk.virtualWrite(V30, totalCubicMeter);
       }
-      Serial.print("Current date: ");
-      Serial.println(asctime(&timeinfo));
     }
   }
 }
