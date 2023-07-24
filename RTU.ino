@@ -11,12 +11,11 @@
 #endif
 
 #define SENSOR  2
-#define LEAK_THRESHOLD 0.01
+#define LEAK_THRESHOLD 0.05
 
 volatile byte pulseCount;
 byte pulse1Sec = 0;
-float calibrationFactor = 6.33;
-//float calibrationFactor = 2.36;
+float calibrationFactor = 6.45;
 float flowMilliLitresPerMinute;  
 float receivedFlowRate = 0.0;
 unsigned long previousMillis = 0;
@@ -39,8 +38,6 @@ const char* password = STAPSK;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-WiFiServer telnetServer(23);
-WiFiClient telnet;
 
 BlynkTimer timer;
 
@@ -48,7 +45,7 @@ BlynkTimer timer;
 float flowReadings[MOVING_AVERAGE_PERIOD];
 int flowReadingsIndex = 0;
 float smoothedFlowRate = 0.0;
-float flowRateDifference = 0.0; // Add this line to define flowRateDifference
+float flowRateDifference = 0.0; 
 
 void setup_wifi() {
   delay(10);
@@ -56,24 +53,10 @@ void setup_wifi() {
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    telnet.print(".");
   }
-
-  telnet.println("");
-  telnet.println("WiFi connected");
-  telnet.println("IP address: ");
-  telnet.println(WiFi.localIP());
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  telnet.print("Message arrived [");
-  telnet.print(topic);
-  telnet.print("] ");
-  for (unsigned int i = 0; i < length; i++) {
-    telnet.print((char)payload[i]);
-  }
-  telnet.println();
-
   String receivedPayload;
   for (unsigned int i = 0; i < length; i++) {
     receivedPayload += (char)payload[i];
@@ -84,21 +67,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 void reconnect() {
   while (!client.connected()) {
-    telnet.print("Attempting MQTT connection...");
     if (client.connect("ESP8266Client")) {
-      telnet.println("connected");
       client.subscribe("flowRate");
     } else {
-      telnet.print("failed, rc=");
-      telnet.print(client.state());
-      telnet.println(" try again in 5 seconds");
       delay(5000);
     }
   }
 }
 
 void checkForLeaks() {
-  float flowRateDifference = abs(smoothedFlowRate - receivedFlowRate);
+  flowRateDifference = abs(smoothedFlowRate - receivedFlowRate);
   
   if ((smoothedFlowRate == 0.0 && receivedFlowRate != 0.0) || 
       (flowRateDifference / smoothedFlowRate > LEAK_THRESHOLD)) {
@@ -108,28 +86,23 @@ void checkForLeaks() {
         leakStartTime = millis();
       } else if (millis() - leakStartTime > leakTimeThreshold) {
         leakDetected = true;
-        telnet.println("Leak detected");
         Blynk.virtualWrite(V31, "Leak detected");
         Blynk.virtualWrite(V34, flowRateDifference);
+        checkLeakageLevel();
       }
     } else {
-      telnet.println("Leak detected");
       Blynk.virtualWrite(V34, flowRateDifference);
       Blynk.virtualWrite(V31, "Leak detected");
+      checkLeakageLevel();
     }
   } else {
     if (leakDetected) {
       leakDetected = false;
       leakStartTime = 0;
-      telnet.println("No leak detected");
-      Blynk.virtualWrite(V31, "No leak detected");
-    } else {
-      telnet.println("No leak detected");
       Blynk.virtualWrite(V31, "No leak detected");
     }
   }
 }
-
 
 void calculateFlow() {
   unsigned long currentMillis = millis();
@@ -152,10 +125,6 @@ void calculateFlow() {
     }
     smoothedFlowRate = totalFlow / MOVING_AVERAGE_PERIOD;
 
-    telnet.print("Flow rate: ");
-    telnet.print(smoothedFlowRate, 2); 
-    telnet.println(" mL/min");
-
     Blynk.virtualWrite(V32, smoothedFlowRate); 
   }
 }
@@ -163,11 +132,11 @@ void calculateFlow() {
 void checkLeakageLevel() {  
     if (flowRateDifference < 0.08) {
         Blynk.virtualWrite(V35, "Negligible leakage");
-    } else if (smoothedFlowRate < 0.4) {
+    } else if (flowRateDifference < 0.4) {
         Blynk.virtualWrite(V35, "Low-level Leakage");
-    } else if (smoothedFlowRate < 1.6) {
+    } else if (flowRateDifference < 1.6) {
         Blynk.virtualWrite(V35, "Moderate Leakage");
-    } else if (smoothedFlowRate < 4) {
+    } else if (flowRateDifference < 4) {
         Blynk.virtualWrite(V35, "Substantial Leakage");
     } else {
         Blynk.virtualWrite(V35, "Severe Leakage");
@@ -187,8 +156,6 @@ void setup() {
 
   previousMillis = millis();
 
-  telnetServer.begin();
-  telnetServer.setNoDelay(true);
   ArduinoOTA.begin();
 
   Blynk.begin(auth, ssid, password);
@@ -207,15 +174,10 @@ void loop() {
     WiFi.begin(ssid, password);
   }
 
-  if (telnetServer.hasClient()) {
-    if (!telnet || !telnet.connected()) {
-      if (telnet) telnet.stop();
-      telnet = telnetServer.available();
-    }
-  }
-
   Blynk.run();
   timer.run(); 
   calculateFlow();
-  checkLeakageLevel();
+  if(leakDetected) {
+    checkLeakageLevel();
+  }
 }
