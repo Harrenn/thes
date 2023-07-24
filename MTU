@@ -18,7 +18,7 @@ char auth[] = "_rT-A_f1jKTxycyowJ-kkFkVaieceJN2";
 
 volatile byte pulseCount;
 byte pulse1Sec = 0;
-float calibrationFactor = 4.5;
+float calibrationFactor = 6.9;
 float flowMilliLitresPerSecond;
 float totalCubicMeter = 0.0;
 unsigned long previousMillis = 0;
@@ -29,7 +29,7 @@ WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
 // Buffer for the simple moving average
-#define BUFF_SIZE 10
+#define BUFF_SIZE 50
 float buff[BUFF_SIZE];
 int buffIndex = 0;
 bool bufferFull = false;
@@ -120,7 +120,7 @@ void calculateFlow() {
     pulse1Sec = pulseCount;
     pulseCount = 0;
     float flowRateLperSec = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
-    flowMilliLitresPerSecond = flowRateLperSec * 1000;
+    flowMilliLitresPerSecond = (flowRateLperSec * 1000)/60;
 
     // Add the flow rate to the buffer
     buff[buffIndex] = flowMilliLitresPerSecond;
@@ -144,6 +144,14 @@ void calculateFlow() {
   }
 }
 
+void checkSensor() {
+  if(digitalRead(SENSOR)) {
+    Blynk.virtualWrite(V37, "Online");
+  } else {
+    Blynk.virtualWrite(V37, "Offline");
+  }
+}
+
 void loop() {
   Blynk.run();
   timer.run();
@@ -153,4 +161,5 @@ void loop() {
     setup_mqtt();
   }
   mqttClient.loop();
+  checkSensor();
 }
