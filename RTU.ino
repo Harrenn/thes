@@ -11,7 +11,7 @@
 #endif
 
 #define SENSOR  2
-#define LEAK_THRESHOLD 0.10
+#define LEAK_THRESHOLD 0.01
 
 volatile byte pulseCount;
 byte pulse1Sec = 0;
@@ -44,10 +44,11 @@ WiFiClient telnet;
 
 BlynkTimer timer;
 
-#define MOVING_AVERAGE_PERIOD 5
+#define MOVING_AVERAGE_PERIOD 50
 float flowReadings[MOVING_AVERAGE_PERIOD];
 int flowReadingsIndex = 0;
 float smoothedFlowRate = 0.0;
+float flowRateDifference = 0.0; // Add this line to define flowRateDifference
 
 void setup_wifi() {
   delay(10);
@@ -98,7 +99,10 @@ void reconnect() {
 
 void checkForLeaks() {
   float flowRateDifference = abs(smoothedFlowRate - receivedFlowRate);
-  if (flowRateDifference / smoothedFlowRate > LEAK_THRESHOLD) {
+  
+  if ((smoothedFlowRate == 0.0 && receivedFlowRate != 0.0) || 
+      (flowRateDifference / smoothedFlowRate > LEAK_THRESHOLD)) {
+
     if (!leakDetected) {
       if (leakStartTime == 0) {
         leakStartTime = millis();
@@ -125,6 +129,7 @@ void checkForLeaks() {
     }
   }
 }
+
 
 void calculateFlow() {
   unsigned long currentMillis = millis();
@@ -158,11 +163,11 @@ void calculateFlow() {
 void checkLeakageLevel() {  
     if (flowRateDifference < 0.08) {
         Blynk.virtualWrite(V35, "Negligible leakage");
-    } else if (flowRatePerSec < 0.4) {
+    } else if (smoothedFlowRate < 0.4) {
         Blynk.virtualWrite(V35, "Low-level Leakage");
-    } else if (flowRatePerSec < 1.6) {
+    } else if (smoothedFlowRate < 1.6) {
         Blynk.virtualWrite(V35, "Moderate Leakage");
-    } else if (flowRatePerSec < 4) {
+    } else if (smoothedFlowRate < 4) {
         Blynk.virtualWrite(V35, "Substantial Leakage");
     } else {
         Blynk.virtualWrite(V35, "Severe Leakage");
