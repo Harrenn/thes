@@ -23,7 +23,9 @@ float flowMilliLitresPerSecond;
 float totalCubicMeter = 0.0;
 unsigned long previousMillis = 0;
 int batteryLevel = 100;
-
+unsigned long lastSensorCheck = 0;
+const unsigned long sensorCheckInterval = 5000; 
+bool dataFromSensor = false;
 BlynkTimer timer;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -146,10 +148,16 @@ void calculateFlow() {
 }
 
 void checkSensor() {
-  if(digitalRead(SENSOR)) {
-    Blynk.virtualWrite(V38, "Online");
-  } else {
-    Blynk.virtualWrite(V38, "Offline");
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - lastSensorCheck > sensorCheckInterval) {
+    dataFromSensor = pulseCount > 0;
+    if (dataFromSensor) {
+      Blynk.virtualWrite(V37, "Online");
+    } else {
+      Blynk.virtualWrite(V37, "Offline");
+    }
+    lastSensorCheck = currentMillis;
   }
 }
 
