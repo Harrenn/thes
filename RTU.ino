@@ -45,7 +45,11 @@ BlynkTimer timer;
 float flowReadings[MOVING_AVERAGE_PERIOD];
 int flowReadingsIndex = 0;
 float smoothedFlowRate = 0.0;
-float flowRateDifference = 0.0; 
+float flowRateDifference = 0.0;
+
+bool dataFromSensor = false;
+unsigned long lastSensorCheck = 0;
+const unsigned long sensorCheckInterval = 5000; 
 
 void setup_wifi() {
   delay(10);
@@ -143,6 +147,21 @@ void checkLeakageLevel() {
     }
 }
 
+void checkSensor() {
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - lastSensorCheck > sensorCheckInterval) {
+    // Read data from sensor
+    dataFromSensor = pulseCount > 0;  // update this based on your specific sensor's data reading method
+    if (dataFromSensor) {
+      Blynk.virtualWrite(V38, "Online");
+    } else {
+      Blynk.virtualWrite(V38, "Offline");
+    }
+    lastSensorCheck = currentMillis;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   setup_wifi();
@@ -161,6 +180,7 @@ void setup() {
   Blynk.begin(auth, ssid, password);
 
   timer.setInterval(1000L, checkForLeaks);
+  timer.setInterval(5000L, checkSensor);  // new timer for checking sensor every 5 seconds
 }
 
 void loop() {
