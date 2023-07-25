@@ -23,8 +23,6 @@ float flowMilliLitresPerSecond;
 float totalCubicMeter;
 unsigned long previousMillis = 0;
 
-int batteryLevel = 100;
-
 BlynkTimer timer;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -32,16 +30,6 @@ PubSubClient mqttClient(espClient);
 ICACHE_RAM_ATTR void pulseCounter() //ESP8266 uses ICACHE_RAM_ATTR before the ISR
 {
   pulseCount++;
-}
-
-void sendBatteryLevel() {
-  Blynk.virtualWrite(V0, batteryLevel);
-}
-
-void decreaseBatteryLevel() {
-  if (batteryLevel > 0) {
-    batteryLevel--;
-  }
 }
 
 void setup_mqtt() {
@@ -78,7 +66,6 @@ void setup()
   setup_mqtt();
   
   Blynk.syncVirtual(V30);
-  Blynk.syncVirtual(V0);
 
   pinMode(SENSOR, INPUT_PULLUP);
   pulseCount = 0;
@@ -89,18 +76,11 @@ void setup()
   configTime(8 * 3600, 0, "pool.ntp.org");
 
   previousMillis = millis();
-  timer.setInterval(1000L, sendBatteryLevel);
-  timer.setInterval(300000L, decreaseBatteryLevel);
 }
 
 BLYNK_WRITE(V30)
 {
   totalCubicMeter = param.asFloat(); 
-}
-
-BLYNK_WRITE(V0)
-{
-  batteryLevel = param.asInt(); 
 }
 
 void calculateFlow()
@@ -120,6 +100,16 @@ void calculateFlow()
     Blynk.virtualWrite(V30, totalCubicMeter);
 
     mqttClient.publish("flowRate", String(flowMilliLitresPerSecond, 2).c_str());
+  }
+  
+  time_t now = time(nullptr);
+  struct tm* p_tm = localtime(&now);
+  String date = String(p_tm->tm_mon + 1) + "/" + String(p_tm->tm_mday) + "/" + String(p_tm->tm_year + 1900);
+  Blynk.virtualWrite(V37, date);  // Send date to Blynk Virtual Pin V37
+
+  if (p_tm->tm_mday == 1 && p_tm->tm_hour == 0 && p_tm->tm_min == 0) {
+    totalCubicMeter = 0.0;  // Reset water consumed value at the start of the month
+    Blynk.virtualWrite(V30, totalCubicMeter);
   }
 }
 
