@@ -99,8 +99,8 @@ void checkForLeaks() {
     if (leakDetected) {
       leakDetected = false;
       leakStartTime = 0;
-      Blynk.virtualWrite(V31, "No leak detected");
     }
+    Blynk.virtualWrite(V31, "No leak detected");
   }
 }
 
